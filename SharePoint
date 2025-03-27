@@ -1,0 +1,83 @@
+# Install required libraries
+%pip install msal requests pandas
+
+import requests
+import json
+import pandas as pd
+
+# 🔹 STEP 1: AUTHENTICATE USING GRAPH API
+tenant_id = "<your-tenant-id>"
+client_id = "<your-app-id>"
+client_secret = "<your-app-secret>"
+
+# OAuth 2.0 Token URL
+token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+
+# Request Access Token
+token_data = {
+    "grant_type": "client_credentials",
+    "client_id": client_id,
+    "client_secret": client_secret,
+    "scope": "https://graph.microsoft.com/.default"
+}
+token_headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+# Fetch Access Token
+response = requests.post(token_url, data=token_data, headers=token_headers)
+access_token = response.json().get("access_token")
+
+if not access_token:
+    raise Exception("❌ Authentication failed! Check credentials.")
+print("✅ Authentication successful!")
+
+# 🔹 STEP 2: GET SHAREPOINT SITE ID
+site_name = "<your-sharepoint-site-name>"  # Example: "contoso.sharepoint.com/sites/yoursite"
+
+# Graph API URL to fetch site details
+graph_url = f"https://graph.microsoft.com/v1.0/sites?search={site_name}"
+headers = {"Authorization": f"Bearer {access_token}"}
+
+# Fetch Site ID
+site_response = requests.get(graph_url, headers=headers)
+if site_response.status_code == 200:
+    site_id = site_response.json()["value"][0]["id"]
+    print(f"✅ Site ID: {site_id}")
+else:
+    raise Exception(f"❌ Error fetching Site ID: {site_response.text}")
+
+# 🔹 STEP 3: GET SHAREPOINT LIST ID
+list_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
+list_response = requests.get(list_url, headers=headers)
+
+if list_response.status_code == 200:
+    lists = list_response.json()["value"]
+    for lst in lists:
+        print(f"📌 List Name: {lst['name']} | List ID: {lst['id']}")
+    
+    # Manually set your List ID from the output above
+    list_id = "<your-list-id>"  # Replace with your actual list ID
+else:
+    raise Exception(f"❌ Error fetching List ID: {list_response.text}")
+
+# 🔹 STEP 4: FETCH ALL COLUMNS (INCLUDING METADATA)
+items_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items?expand=fields"
+
+# Fetch items
+items_response = requests.get(items_url, headers=headers)
+
+if items_response.status_code == 200:
+    data = items_response.json()["value"]
+
+    # Extract 'fields' dictionary which contains column data
+    records = [item["fields"] for item in data]
+
+    # Convert to Pandas DataFrame
+    df = pd.DataFrame(records)
+    display(df)  # Show DataFrame in Databricks
+else:
+    raise Exception(f"❌ Error fetching items: {items_response.text}")
+
+# 🔹 STEP 5: SAVE DATA TO DATABRICKS TABLE (OPTIONAL)
+df.write.format("delta").saveAsTable("sharepoint_data")
+
+print("✅ Data successfully fetched and saved in Databricks!")
